@@ -89,7 +89,28 @@ if IS_PROD:
     # Handle reverse proxy headers (Fly.io / Render / nginx / load balancers)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(32)
+def get_or_create_secret_key() -> bytes:
+    env_key = os.environ.get("FLASK_SECRET_KEY")
+    if env_key:
+        return env_key.encode("utf-8") if isinstance(env_key, str) else env_key
+    key_dir = DATA_DIR if DATA_DIR else os.path.dirname(os.path.abspath(__file__))
+    key_file = os.path.join(key_dir, "flask_secret.key")
+    try:
+        if os.path.exists(key_file):
+            with open(key_file, "rb") as f:
+                k = f.read().strip()
+                if len(k) >= 16:
+                    return k
+        k = os.urandom(32)
+        with open(key_file, "wb") as f:
+            f.write(k)
+        return k
+    except Exception as e:
+        logger.warning(f"Could not persist secret key to {key_file}: {e}")
+        return os.urandom(32)
+
+
+app.secret_key = get_or_create_secret_key()
 
 # Secure session cookies
 app.config.update(
@@ -181,11 +202,14 @@ def handle_internal_error(e):
 
 
 def current_client():
-    sid = session.get("sid")
-    if sid is None:
+    sid = session.get("sid") or request.headers.get("X-Session-ID")
+    if not sid:
         return None
     client = CLIENTS.get(sid)
     if client is not None:
+        if "sid" not in session:
+            session["sid"] = sid
+            session.permanent = True
         return client
     # Restore session from persistent SQLite store
     sess = db.get_user_session(sid)
@@ -193,6 +217,9 @@ def current_client():
         client = UvaClient.from_cookies(sess["username"], sess.get("cookies", {}))
         CLIENTS[sid] = client
         db.touch_user_session(sid)
+        if "sid" not in session:
+            session["sid"] = sid
+            session.permanent = True
         return client
     return None
 
@@ -235,12 +262,12 @@ def login():
         uid = 0
     db.save_user_session(sid, username, uid, client.get_cookies_dict())
 
-    return jsonify({"ok": True, "username": username})
+    return jsonify({"ok": True, "username": username, "sid": sid})
 
 
 @app.post("/api/logout")
 def logout():
-    sid = session.pop("sid", None)
+    sid = session.pop("sid", None) or request.headers.get("X-Session-ID")
     if sid:
         CLIENTS.pop(sid, None)
         db.delete_user_session(sid)

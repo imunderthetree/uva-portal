@@ -2,12 +2,18 @@ const BASE = '/api'
 
 async function request(path, options = {}) {
   const { headers, ...restOptions } = options
+  const reqHeaders = {
+    'Content-Type': 'application/json',
+    ...headers,
+  }
+  const sid = localStorage.getItem('uva_sid')
+  if (sid) {
+    reqHeaders['X-Session-ID'] = sid
+  }
+
   const resp = await fetch(BASE + path, {
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    },
+    headers: reqHeaders,
     ...restOptions,
   })
   const data = await resp.json().catch(() => ({}))
@@ -21,10 +27,31 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  me: () => request('/me'),
-  login: (username, password) =>
-    request('/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
-  logout: () => request('/logout', { method: 'POST' }),
+  me: async () => {
+    const res = await request('/me')
+    if (res && !res.logged_in) {
+      // If server explicitly confirmed not logged in, clear stale sid
+      localStorage.removeItem('uva_sid')
+    }
+    return res
+  },
+  login: async (username, password) => {
+    const res = await request('/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    if (res && res.sid) {
+      localStorage.setItem('uva_sid', res.sid)
+    }
+    return res
+  },
+  logout: async () => {
+    try {
+      return await request('/logout', { method: 'POST' })
+    } finally {
+      localStorage.removeItem('uva_sid')
+    }
+  },
   problems: (q) => request(`/problems?q=${encodeURIComponent(q || '')}`),
   problemPdfUrl: (num) => `${BASE}/problem/${num}/pdf`,
   submit: (problem_number, language, code) =>
