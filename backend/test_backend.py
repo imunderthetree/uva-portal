@@ -343,6 +343,100 @@ class BackendTestCase(unittest.TestCase):
         finally:
             app.testing = True
 
+    def test_session_persistence(self):
+        # Save session to DB
+        sid = "test_persist_sid_123"
+        db.save_user_session(sid, "persistent_user", 12345, {"cookie_a": "val_a"})
+        sess = db.get_user_session(sid)
+        self.assertIsNotNone(sess)
+        self.assertEqual(sess["username"], "persistent_user")
+        self.assertEqual(sess["cookies"], {"cookie_a": "val_a"})
+
+        # Touch and delete
+        db.touch_user_session(sid)
+        db.delete_user_session(sid)
+        self.assertIsNone(db.get_user_session(sid))
+
+    def test_sheet_groups_and_nested_sheets(self):
+        # Create group
+        g_res = self.client.post("/api/groups", json={"name": "Dynamic Programming", "description": "DP classics"})
+        self.assertEqual(g_res.status_code, 201)
+        group = g_res.get_json()
+        group_id = group["id"]
+        self.assertEqual(group["name"], "Dynamic Programming")
+
+        # Create sheet in group
+        s_res = self.client.post("/api/sheets", json={"name": "Knapsack & Subsequences", "group_id": group_id})
+        self.assertEqual(s_res.status_code, 201)
+        sheet = s_res.get_json()
+        self.assertEqual(sheet["group_id"], group_id)
+
+        # List groups
+        groups_list = self.client.get("/api/groups").get_json()
+        dp_group = next((g for g in groups_list if g["id"] == group_id), None)
+        self.assertIsNotNone(dp_group)
+        self.assertEqual(dp_group["sheet_count"], 1)
+
+        # Delete group
+        del_g = self.client.delete(f"/api/groups/{group_id}")
+        self.assertEqual(del_g.status_code, 200)
+
+    def test_contest_creation_with_direct_problem_numbers(self):
+        # Create contest providing problem_numbers directly without prior sheet
+        res = self.client.post("/api/contests", json={
+            "name": "Direct Problems Contest",
+            "problem_numbers": "100, 10189",
+            "start_time": "2026-10-01T10:00:00Z",
+            "end_time": "2026-10-01T12:00:00Z",
+            "penalty_minutes": 20,
+        })
+        self.assertEqual(res.status_code, 201)
+        c_data = res.get_json()
+        self.assertIn("id", c_data)
+        self.assertTrue(c_data["sheet_id"] > 0)
+
+        # Verify backing sheet was created and has the problems
+        sheet_res = self.client.get(f"/api/sheets/{c_data['sheet_id']}")
+        self.assertEqual(sheet_res.status_code, 200)
+        sheet = sheet_res.get_json()
+        self.assertEqual(len(sheet["problems"]), 2)
+        prob_nums = [p["problem_number"] for p in sheet["problems"]]
+        self.assertIn(100, prob_nums)
+        self.assertIn(10189, prob_nums)
+
+    def test_teams_crud(self):
+        # Mock authenticated client by setting session
+        with self.client.session_transaction() as sess:
+            sess["sid"] = "team_owner_sid"
+        # Seed DB session
+        db.save_user_session("team_owner_sid", "alice", 111, {})
+
+        # Create team
+        t_res = self.client.post("/api/teams", json={"name": "ICPC Team Alpha", "description": "Road to Finals"})
+        self.assertEqual(t_res.status_code, 201)
+        team = t_res.get_json()
+        team_id = team["id"]
+        self.assertEqual(team["name"], "ICPC Team Alpha")
+        self.assertEqual(team["owner"], "alice")
+        self.assertEqual(len(team["members"]), 1)
+        self.assertEqual(team["members"][0]["username"], "alice")
+
+        # Add member
+        add_m = self.client.post(f"/api/teams/{team_id}/members", json={"username": "bob"})
+        self.assertEqual(add_m.status_code, 200)
+
+        # Get team
+        get_t = self.client.get(f"/api/teams/{team_id}").get_json()
+        self.assertEqual(len(get_t["members"]), 2)
+
+        # Remove member
+        rem_m = self.client.delete(f"/api/teams/{team_id}/members/bob")
+        self.assertEqual(rem_m.status_code, 200)
+
+        # Delete team
+        del_t = self.client.delete(f"/api/teams/{team_id}")
+        self.assertEqual(del_t.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

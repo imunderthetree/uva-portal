@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 
@@ -22,13 +23,23 @@ def init_db():
     with get_db() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS sheet_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                owner TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS sheets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                group_id INTEGER DEFAULT NULL,
                 is_private INTEGER DEFAULT 0,
                 access_code TEXT DEFAULT '',
                 owner TEXT DEFAULT '',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (group_id) REFERENCES sheet_groups(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS sheet_problems (
@@ -68,11 +79,38 @@ def init_db():
                 code TEXT NOT NULL,
                 submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                session_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                user_id INTEGER DEFAULT 0,
+                cookies_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS teams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                owner TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS team_members (
+                team_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                role TEXT DEFAULT 'member',
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (team_id, username),
+                FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+            );
             """
         )
 
         # Apply schema migrations safely if table existed previously without new columns
         for table, col, col_type in [
+            ("sheets", "group_id", "INTEGER DEFAULT NULL"),
             ("sheets", "is_private", "INTEGER DEFAULT 0"),
             ("sheets", "access_code", "TEXT DEFAULT ''"),
             ("sheets", "owner", "TEXT DEFAULT ''"),
@@ -87,13 +125,71 @@ def init_db():
 
 
 def purge_test_records():
-    """Remove test sheets and test contests generated during automated testing."""
+    """Remove test sheets, contests, groups and teams generated during automated testing."""
     with get_db() as conn:
-        conn.execute("DELETE FROM sheets WHERE name LIKE 'Test Sheet%' OR name LIKE 'Test%' OR name LIKE '%DROP TABLE%' OR name = 'Contest Sheet'")
-        conn.execute("DELETE FROM contests WHERE name LIKE 'Practice Contest%'")
+        conn.execute("DELETE FROM sheets WHERE name LIKE 'Test Sheet%' OR name LIKE 'Test%' OR name LIKE '%DROP TABLE%' OR name = 'Contest Sheet' OR name LIKE 'Contest: %'")
+        conn.execute("DELETE FROM contests WHERE name LIKE 'Practice Contest%' OR name = 'Direct Problems Contest'")
+        conn.execute("DELETE FROM sheet_groups WHERE name = 'Dynamic Programming' OR name LIKE 'Test%'")
+        conn.execute("DELETE FROM teams WHERE name LIKE 'ICPC Team%' OR name LIKE 'Test%'")
 
 
-def create_sheet(name: str, is_private: int = 0, access_code: str = "", owner: str = ""):
+def create_group(name: str, description: str = "", owner: str = ""):
+    name = (name or "").strip()
+    if not name or len(name) > 100:
+        raise ValueError("Group name must be between 1 and 100 characters.")
+    description = (description or "").strip()[:500]
+    owner = (owner or "").strip()[:100]
+
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO sheet_groups (name, description, owner, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+            """,
+            (name, description, owner),
+        )
+        group_id = cursor.lastrowid
+        row = conn.execute("SELECT * FROM sheet_groups WHERE id = ?", (group_id,)).fetchone()
+        return dict(row)
+
+
+def list_groups():
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT g.id, g.name, g.description, g.owner, g.created_at,
+                   COUNT(s.id) AS sheet_count
+            FROM sheet_groups g
+            LEFT JOIN sheets s ON g.id = s.group_id
+            GROUP BY g.id
+            ORDER BY g.created_at ASC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_group(group_id: int):
+    try:
+        group_id = int(group_id)
+    except (ValueError, TypeError):
+        return None
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM sheet_groups WHERE id = ?", (group_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def delete_group(group_id: int):
+    try:
+        group_id = int(group_id)
+    except (ValueError, TypeError):
+        return False
+    with get_db() as conn:
+        conn.execute("UPDATE sheets SET group_id = NULL WHERE group_id = ?", (group_id,))
+        cursor = conn.execute("DELETE FROM sheet_groups WHERE id = ?", (group_id,))
+        return cursor.rowcount > 0
+
+
+def create_sheet(name: str, is_private: int = 0, access_code: str = "", owner: str = "", group_id: int = None):
     name = (name or "").strip()
     if not name or len(name) > 200:
         raise ValueError("Sheet name must be between 1 and 200 characters.")
@@ -101,26 +197,53 @@ def create_sheet(name: str, is_private: int = 0, access_code: str = "", owner: s
     owner = (owner or "").strip()[:100]
     is_private = 1 if is_private else 0
 
+    if group_id is not None:
+        try:
+            group_id = int(group_id)
+        except (ValueError, TypeError):
+            group_id = None
+
     with get_db() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO sheets (name, is_private, access_code, owner, created_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
+            INSERT INTO sheets (name, group_id, is_private, access_code, owner, created_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
             """,
-            (name, is_private, access_code, owner),
+            (name, group_id, is_private, access_code, owner),
         )
         sheet_id = cursor.lastrowid
-        row = conn.execute("SELECT * FROM sheets WHERE id = ?", (sheet_id,)).fetchone()
+        row = conn.execute(
+            """
+            SELECT s.*, g.name AS group_name
+            FROM sheets s
+            LEFT JOIN sheet_groups g ON s.group_id = g.id
+            WHERE s.id = ?
+            """,
+            (sheet_id,),
+        ).fetchone()
         return dict(row)
+
+
+def set_sheet_group(sheet_id: int, group_id: int = None):
+    try:
+        sheet_id = int(sheet_id)
+        if group_id is not None:
+            group_id = int(group_id)
+    except (ValueError, TypeError):
+        return False
+    with get_db() as conn:
+        cursor = conn.execute("UPDATE sheets SET group_id = ? WHERE id = ?", (group_id, sheet_id))
+        return cursor.rowcount > 0
 
 
 def list_sheets():
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT s.id, s.name, s.is_private, s.owner, s.created_at,
+            SELECT s.id, s.name, s.group_id, g.name AS group_name, s.is_private, s.owner, s.created_at,
                    COUNT(sp.problem_number) AS problem_count
             FROM sheets s
+            LEFT JOIN sheet_groups g ON s.group_id = g.id
             LEFT JOIN sheet_problems sp ON s.id = sp.sheet_id
             GROUP BY s.id
             ORDER BY s.created_at DESC
@@ -397,4 +520,190 @@ def get_submission_code(run_id: str, username: str = None):
         if row:
             return dict(row)
         return None
+
+
+# ---------------------------------------------------------------------------
+# User Sessions
+# ---------------------------------------------------------------------------
+
+def save_user_session(session_id: str, username: str, user_id: int = 0, cookies_dict: dict = None):
+    if not session_id or not username:
+        return False
+    cookies_json = json.dumps(cookies_dict or {})
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_sessions (session_id, username, user_id, cookies_json, created_at, last_active)
+            VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(session_id) DO UPDATE SET
+                username = excluded.username,
+                user_id = excluded.user_id,
+                cookies_json = excluded.cookies_json,
+                last_active = datetime('now')
+            """,
+            (session_id, username, int(user_id or 0), cookies_json),
+        )
+        return True
+
+
+def get_user_session(session_id: str):
+    if not session_id:
+        return None
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM user_sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["cookies"] = json.loads(d.get("cookies_json") or "{}")
+        except Exception:
+            d["cookies"] = {}
+        return d
+
+
+def delete_user_session(session_id: str):
+    if not session_id:
+        return False
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM user_sessions WHERE session_id = ?", (session_id,))
+        return cursor.rowcount > 0
+
+
+def touch_user_session(session_id: str):
+    if not session_id:
+        return False
+    with get_db() as conn:
+        cursor = conn.execute("UPDATE user_sessions SET last_active = datetime('now') WHERE session_id = ?", (session_id,))
+        return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Teams
+# ---------------------------------------------------------------------------
+
+def create_team(name: str, description: str = "", owner: str = ""):
+    name = (name or "").strip()
+    if not name or len(name) > 100:
+        raise ValueError("Team name must be between 1 and 100 characters.")
+    owner = (owner or "").strip()[:100]
+    if not owner:
+        raise ValueError("Team owner is required.")
+    description = (description or "").strip()[:500]
+
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO teams (name, description, owner, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+            """,
+            (name, description, owner),
+        )
+        team_id = cursor.lastrowid
+        conn.execute(
+            """
+            INSERT INTO team_members (team_id, username, role, joined_at)
+            VALUES (?, ?, 'owner', datetime('now'))
+            """,
+            (team_id, owner),
+        )
+    return get_team(team_id)
+
+
+def list_teams():
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT t.id, t.name, t.description, t.owner, t.created_at,
+                   COUNT(tm.username) AS member_count
+            FROM teams t
+            LEFT JOIN team_members tm ON t.id = tm.team_id
+            GROUP BY t.id
+            ORDER BY t.created_at DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_team(team_id: int):
+    try:
+        team_id = int(team_id)
+    except (ValueError, TypeError):
+        return None
+    with get_db() as conn:
+        team_row = conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone()
+        if not team_row:
+            return None
+        members = conn.execute(
+            """
+            SELECT tm.username, tm.role, tm.joined_at,
+                   COALESCE(p.avatar, '') AS avatar,
+                   COALESCE(p.bio, '') AS bio
+            FROM team_members tm
+            LEFT JOIN user_profiles p ON tm.username = p.username
+            WHERE tm.team_id = ?
+            ORDER BY CASE WHEN tm.role = 'owner' THEN 0 ELSE 1 END, tm.joined_at ASC
+            """,
+            (team_id,),
+        ).fetchall()
+        team_dict = dict(team_row)
+        team_dict["members"] = [dict(m) for m in members]
+        team_dict["member_count"] = len(members)
+        return team_dict
+
+
+def add_team_member(team_id: int, username: str, role: str = "member"):
+    try:
+        team_id = int(team_id)
+    except (ValueError, TypeError):
+        raise ValueError("Invalid team ID.")
+    username = (username or "").strip()
+    if not username:
+        raise ValueError("Username is required.")
+    role = "owner" if role == "owner" else "member"
+
+    with get_db() as conn:
+        team = conn.execute("SELECT id FROM teams WHERE id = ?", (team_id,)).fetchone()
+        if not team:
+            raise ValueError("Team not found.")
+        existing = conn.execute(
+            "SELECT username FROM team_members WHERE team_id = ? AND LOWER(username) = LOWER(?)",
+            (team_id, username),
+        ).fetchone()
+        if existing:
+            raise ValueError("User is already a member of this team.")
+        conn.execute(
+            """
+            INSERT INTO team_members (team_id, username, role, joined_at)
+            VALUES (?, ?, ?, datetime('now'))
+            """,
+            (team_id, username, role),
+        )
+        return True
+
+
+def remove_team_member(team_id: int, username: str):
+    try:
+        team_id = int(team_id)
+    except (ValueError, TypeError):
+        return False
+    username = (username or "").strip()
+    if not username:
+        return False
+    with get_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM team_members WHERE team_id = ? AND LOWER(username) = LOWER(?)",
+            (team_id, username),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_team(team_id: int):
+    try:
+        team_id = int(team_id)
+    except (ValueError, TypeError):
+        return False
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+        return cursor.rowcount > 0
+
 

@@ -96,7 +96,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=IS_PROD,
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
 
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173")
@@ -184,7 +184,17 @@ def current_client():
     sid = session.get("sid")
     if sid is None:
         return None
-    return CLIENTS.get(sid)
+    client = CLIENTS.get(sid)
+    if client is not None:
+        return client
+    # Restore session from persistent SQLite store
+    sess = db.get_user_session(sid)
+    if sess:
+        client = UvaClient.from_cookies(sess["username"], sess.get("cookies", {}))
+        CLIENTS[sid] = client
+        db.touch_user_session(sid)
+        return client
+    return None
 
 
 @app.post("/api/login")
@@ -218,6 +228,13 @@ def login():
     CLIENTS[sid] = client
     session["sid"] = sid
     session.permanent = True
+
+    try:
+        uid = uhunt.get_uid(username) or 0
+    except Exception:
+        uid = 0
+    db.save_user_session(sid, username, uid, client.get_cookies_dict())
+
     return jsonify({"ok": True, "username": username})
 
 
@@ -226,6 +243,7 @@ def logout():
     sid = session.pop("sid", None)
     if sid:
         CLIENTS.pop(sid, None)
+        db.delete_user_session(sid)
     return jsonify({"ok": True})
 
 
@@ -367,10 +385,29 @@ def solved():
         if s[2] == 90:  # Accepted
             solved_ids.add(s[1])
 
+    solved_problems = []
+    for pid in sorted(solved_ids):
+        info = uhunt.get_problem_by_pid(pid)
+        if info:
+            solved_problems.append({
+                "id": info["id"],
+                "number": info["number"],
+                "title": info["title"],
+                "dacu": info.get("dacu", 0),
+            })
+        else:
+            solved_problems.append({
+                "id": pid,
+                "number": pid,
+                "title": f"Problem {pid}",
+                "dacu": 0,
+            })
+
     return jsonify(
         {
-            "total_solved": len(solved_ids),
+            "total_solved": len(solved_problems),
             "solved_problem_ids": sorted(solved_ids),
+            "solved_problems": solved_problems,
         }
     )
 
@@ -453,8 +490,47 @@ def poll(run_id):
 
 
 # ---------------------------------------------------------------------------
-# Sheets
+# Groups & Sheets
 # ---------------------------------------------------------------------------
+
+
+@app.get("/api/groups")
+def list_groups():
+    return jsonify(db.list_groups())
+
+
+@app.post("/api/groups")
+def create_group():
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name or len(name) > 100:
+        return jsonify({"error": "Group name must be between 1 and 100 characters."}), 400
+    description = (data.get("description") or "").strip()[:500]
+    client = current_client()
+    owner = client.username if client else ""
+    try:
+        group = db.create_group(name, description=description, owner=owner)
+        return jsonify(group), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.delete("/api/groups/<int:group_id>")
+def delete_group(group_id):
+    ok = db.delete_group(group_id)
+    if not ok:
+        return jsonify({"error": "Group not found."}), 404
+    return jsonify({"ok": True})
+
+
+@app.patch("/api/sheets/<int:sheet_id>/group")
+def set_sheet_group(sheet_id):
+    data = request.get_json(force=True, silent=True) or {}
+    group_id = data.get("group_id")
+    ok = db.set_sheet_group(sheet_id, group_id)
+    if not ok:
+        return jsonify({"error": "Sheet not found or invalid group."}), 400
+    return jsonify({"ok": True})
 
 
 @app.post("/api/sheets")
@@ -464,13 +540,14 @@ def create_sheet():
     if not name or len(name) > 200:
         return jsonify({"error": "Sheet name must be between 1 and 200 characters."}), 400
 
+    group_id = data.get("group_id")
     is_private = 1 if data.get("is_private") else 0
     access_code = str(data.get("access_code") or "").strip()
     client = current_client()
     owner = client.username if client else ""
 
     try:
-        sheet = db.create_sheet(name, is_private=is_private, access_code=access_code, owner=owner)
+        sheet = db.create_sheet(name, is_private=is_private, access_code=access_code, owner=owner, group_id=group_id)
         return jsonify(sheet), 201
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -593,6 +670,7 @@ def create_contest():
     data = request.get_json(force=True, silent=True) or {}
     name = (data.get("name") or "").strip()
     sheet_id = data.get("sheet_id")
+    problem_numbers = data.get("problem_numbers")
     start_time = data.get("start_time")
     end_time = data.get("end_time")
     penalty_minutes = data.get("penalty_minutes", 20)
@@ -601,11 +679,42 @@ def create_contest():
     client = current_client()
     owner = client.username if client else ""
 
-    if not name or not sheet_id or not start_time or not end_time:
-        return jsonify({"error": "name, sheet_id, start_time, and end_time are required."}), 400
+    if not name or not start_time or not end_time:
+        return jsonify({"error": "Contest name, start_time, and end_time are required."}), 400
+
+    if not sheet_id and not problem_numbers:
+        return jsonify({"error": "Please select a sheet or enter problem numbers for the contest."}), 400
 
     if len(name) > 200:
         return jsonify({"error": "Contest name must not exceed 200 characters."}), 400
+
+    if not sheet_id and problem_numbers:
+        if isinstance(problem_numbers, str):
+            parts = [p.strip() for p in problem_numbers.replace(",", " ").split() if p.strip()]
+        elif isinstance(problem_numbers, list):
+            parts = [str(p).strip() for p in problem_numbers if str(p).strip()]
+        else:
+            parts = []
+
+        valid_p_nums = []
+        for p in parts:
+            try:
+                val = int(p)
+                if 0 < val <= 999999:
+                    valid_p_nums.append(val)
+            except (ValueError, TypeError):
+                pass
+
+        if not valid_p_nums:
+            return jsonify({"error": "No valid problem numbers provided. Enter problem numbers like 100, 10189."}), 400
+
+        try:
+            sheet = db.create_sheet(f"Contest: {name}", is_private=is_private, access_code=access_code, owner=owner)
+            sheet_id = sheet["id"]
+            for pn in valid_p_nums:
+                db.add_problem_to_sheet(sheet_id, pn)
+        except Exception as e:
+            return jsonify({"error": f"Failed to initialize contest sheet: {e}"}), 400
 
     try:
         sheet_id = int(sheet_id)
@@ -951,9 +1060,121 @@ def update_profile_avatar():
     # Cap avatar data URI / URL to 200 KB
     if len(avatar) > 204800:
         return jsonify({"error": "Avatar payload too large (max 200 KB)."}), 400
-
     db.set_user_avatar(client.username, avatar)
     return jsonify({"ok": True, "avatar": avatar})
+
+
+# ---------------------------------------------------------------------------
+# Teams
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/teams")
+def list_teams():
+    return jsonify(db.list_teams())
+
+
+@app.post("/api/teams")
+def create_team():
+    client = current_client()
+    if client is None:
+        return jsonify({"error": "You must be logged in to create a team."}), 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get("name") or "").strip()
+    description = (data.get("description") or "").strip()
+    if not name or len(name) > 100:
+        return jsonify({"error": "Team name must be between 1 and 100 characters."}), 400
+
+    try:
+        team = db.create_team(name, description, client.username)
+        return jsonify(team), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/teams/<int:team_id>")
+def get_team(team_id):
+    team = db.get_team(team_id)
+    if not team:
+        return jsonify({"error": "Team not found."}), 404
+
+    all_team_solved = set()
+    for member in team.get("members", []):
+        u_name = member["username"]
+        try:
+            uid = uhunt.get_uid(u_name)
+            if uid:
+                u_subs = uhunt.get_user_submissions(uid)
+                member_solved = {s[1] for s in u_subs.get("subs", []) if s[2] == 90}
+                member["solved_count"] = len(member_solved)
+                all_team_solved.update(member_solved)
+            else:
+                member["solved_count"] = 0
+        except Exception:
+            member["solved_count"] = 0
+
+    team["total_solved_unique"] = len(all_team_solved)
+    return jsonify(team)
+
+
+@app.post("/api/teams/<int:team_id>/members")
+def add_team_member(team_id):
+    client = current_client()
+    if client is None:
+        return jsonify({"error": "You must be logged in to add members."}), 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    username = (data.get("username") or "").strip()
+    if not username:
+        return jsonify({"error": "Username is required."}), 400
+
+    if len(username) > 100 or not username.replace("_", "").replace("-", "").isalnum():
+        return jsonify({"error": "Invalid username format."}), 400
+
+    try:
+        db.add_team_member(team_id, username, role="member")
+        return jsonify({"ok": True, "username": username})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.delete("/api/teams/<int:team_id>/members/<username>")
+def remove_team_member(team_id, username):
+    client = current_client()
+    if client is None:
+        return jsonify({"error": "Not logged in."}), 401
+
+    team = db.get_team(team_id)
+    if not team:
+        return jsonify({"error": "Team not found."}), 404
+
+    is_owner = team["owner"].lower() == client.username.lower()
+    is_self = username.lower() == client.username.lower()
+    if not is_owner and not is_self:
+        return jsonify({"error": "Only the team owner can remove other members."}), 403
+
+    ok = db.remove_team_member(team_id, username)
+    if not ok:
+        return jsonify({"error": "Member not found in team."}), 404
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/teams/<int:team_id>")
+def delete_team(team_id):
+    client = current_client()
+    if client is None:
+        return jsonify({"error": "Not logged in."}), 401
+
+    team = db.get_team(team_id)
+    if not team:
+        return jsonify({"error": "Team not found."}), 404
+
+    if team["owner"].lower() != client.username.lower():
+        return jsonify({"error": "Only the team owner can delete the team."}), 403
+
+    db.delete_team(team_id)
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

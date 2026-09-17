@@ -67,6 +67,19 @@ class UvaClient:
     def logged_in(self):
         return self.username is not None
 
+    def get_cookies_dict(self) -> dict:
+        """Return session cookies as a dictionary."""
+        return requests.utils.dict_from_cookiejar(self.session.cookies)
+
+    @classmethod
+    def from_cookies(cls, username: str, cookies_dict: dict):
+        """Reconstruct an authenticated UvaClient from serialized cookies."""
+        client = cls()
+        client.username = username
+        if cookies_dict:
+            client.session.cookies.update(cookies_dict)
+        return client
+
     def login(self, username: str, password: str) -> None:
         index_resp = self.session.get(BASE_URL, timeout=15)
         index_resp.raise_for_status()

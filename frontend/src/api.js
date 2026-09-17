@@ -38,7 +38,18 @@ export const api = {
   getSubmissionCode: (run_id) => request(`/submissions/${run_id}/code`),
 
 
-  // Sheets
+  // Groups & Sheets
+  getGroups: () => request('/groups'),
+  createGroup: (payload) => {
+    const body = typeof payload === 'string' ? { name: payload } : payload
+    return request('/groups', { method: 'POST', body: JSON.stringify(body) })
+  },
+  deleteGroup: (id) => request(`/groups/${id}`, { method: 'DELETE' }),
+  setSheetGroup: (sheetId, group_id) =>
+    request(`/sheets/${sheetId}/group`, {
+      method: 'PATCH',
+      body: JSON.stringify({ group_id }),
+    }),
   getSheets: () => request('/sheets'),
   getSheet: (id, accessCode = '') =>
     request(`/sheets/${id}`, {
@@ -76,6 +87,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ access_code }),
     }),
+
+  // Teams
+  getTeams: () => request('/teams'),
+  getTeam: (id) => request(`/teams/${id}`),
+  createTeam: (payload) =>
+    request('/teams', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteTeam: (id) => request(`/teams/${id}`, { method: 'DELETE' }),
+  addTeamMember: (teamId, username) =>
+    request(`/teams/${teamId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    }),
+  removeTeamMember: (teamId, username) =>
+    request(`/teams/${teamId}/members/${encodeURIComponent(username)}`, { method: 'DELETE' }),
 
   // Profile
   getProfile: () => request('/profile'),

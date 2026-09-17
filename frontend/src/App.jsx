@@ -28,6 +28,8 @@ import {
   Trophy,
   UploadSimple,
   User,
+  UserPlus,
+  UsersThree,
   X,
 } from '@phosphor-icons/react'
 
@@ -794,22 +796,53 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
   const [selectedSheetId, setSelectedSheetId] = useState(null)
   const [sheetData, setSheetData] = useState(null)
   const [loadingSheet, setLoadingSheet] = useState(false)
+  const [groups, setGroups] = useState([])
+  const [selectedGroupId, setSelectedGroupId] = useState('all')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false)
   const [newSheetName, setNewSheetName] = useState('')
+  const [newSheetGroupId, setNewSheetGroupId] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
   const [accessCode, setAccessCode] = useState('')
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupDesc, setNewGroupDesc] = useState('')
   const [newProblemNumber, setNewProblemNumber] = useState('')
   const [newProblemNote, setNewProblemNote] = useState('')
   const [error, setError] = useState('')
+  const [sheetModalError, setSheetModalError] = useState('')
+  const [groupModalError, setGroupModalError] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
   const [passkeyModalTarget, setPasskeyModalTarget] = useState(null)
   const unlockedCodesRef = useRef({})
 
-  useEffect(() => {
-    if (sheets.length > 0 && selectedSheetId === null) {
-      setSelectedSheetId(sheets[0].id)
+  async function loadGroups() {
+    try {
+      const list = await api.getGroups()
+      setGroups(list || [])
+    } catch {
+      // ignore
     }
-  }, [sheets, selectedSheetId])
+  }
+
+  useEffect(() => {
+    loadGroups()
+  }, [])
+
+  const filteredSheets = sheets.filter((s) => {
+    if (selectedGroupId === 'all') return true
+    if (selectedGroupId === 'ungrouped') return !s.group_id
+    return s.group_id === Number(selectedGroupId)
+  })
+
+  useEffect(() => {
+    if (filteredSheets.length > 0) {
+      if (!selectedSheetId || !filteredSheets.some((s) => s.id === selectedSheetId)) {
+        setSelectedSheetId(filteredSheets[0].id)
+      }
+    } else {
+      setSelectedSheetId(null)
+    }
+  }, [selectedGroupId, sheets])
 
   useEffect(() => {
     if (selectedSheetId) {
@@ -851,9 +884,11 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
     e.preventDefault()
     if (!newSheetName.trim()) return
     setActionBusy(true)
+    setSheetModalError('')
     try {
       const res = await api.createSheet({
         name: newSheetName.trim(),
+        group_id: newSheetGroupId ? Number(newSheetGroupId) : null,
         is_private: isPrivate,
         access_code: isPrivate ? accessCode.trim() : '',
       })
@@ -861,12 +896,47 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
       setIsPrivate(false)
       setAccessCode('')
       setShowCreateModal(false)
+      await loadGroups()
       await onRefreshSheets?.()
       setSelectedSheetId(res.id)
     } catch (err) {
-      setError(err.message)
+      setSheetModalError(err.message)
     } finally {
       setActionBusy(false)
+    }
+  }
+
+  async function handleCreateGroup(e) {
+    e.preventDefault()
+    if (!newGroupName.trim()) return
+    setActionBusy(true)
+    setGroupModalError('')
+    try {
+      const g = await api.createGroup({
+        name: newGroupName.trim(),
+        description: newGroupDesc.trim(),
+      })
+      setShowCreateGroupModal(false)
+      setNewGroupName('')
+      setNewGroupDesc('')
+      await loadGroups()
+      setSelectedGroupId(String(g.id))
+    } catch (err) {
+      setGroupModalError(err.message)
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  async function handleDeleteGroup(gid, gname) {
+    if (!window.confirm(`Are you sure you want to delete the group "${gname}"? Its sheets will remain intact under General.`)) return
+    try {
+      await api.deleteGroup(gid)
+      if (String(selectedGroupId) === String(gid)) setSelectedGroupId('all')
+      await loadGroups()
+      await onRefreshSheets?.()
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -875,6 +945,7 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
     try {
       await api.deleteSheet(sheetId)
       setSelectedSheetId(null)
+      await loadGroups()
       await onRefreshSheets?.()
     } catch (err) {
       setError(err.message)
@@ -912,46 +983,129 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
   const solvedCount = sheetData?.problems?.filter((p) => p.solved).length || 0
   const totalCount = sheetData?.problems?.length || 0
   const percent = totalCount > 0 ? (solvedCount / totalCount) * 100 : 0
+  const hasUngrouped = sheets.some((s) => !s.group_id)
 
   return (
     <div className="panel sheets-layout">
       <div className="panel-head">
         <div>
-          <h2>Problem Sheets</h2>
-          <div className="panel-sub">Curated problem sets & study collections</div>
+          <h2>Problem Sheets & Groups</h2>
+          <div className="panel-sub">Organize your training topics into Groups and Sub-Sheets</div>
         </div>
-        <button
-          type="button"
-          className="btn-small"
-          onClick={() => setShowCreateModal(true)}
-        >
-          <Plus size={14} weight="bold" />
-          New Sheet
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="btn-text"
+            onClick={() => {
+              setGroupModalError('')
+              setShowCreateGroupModal(true)
+            }}
+          >
+            <Plus size={14} weight="bold" />
+            New Group
+          </button>
+          <button
+            type="button"
+            className="btn-small"
+            onClick={() => {
+              setSheetModalError('')
+              setNewSheetGroupId(selectedGroupId !== 'all' && selectedGroupId !== 'ungrouped' ? String(selectedGroupId) : '')
+              setShowCreateModal(true)
+            }}
+          >
+            <Plus size={14} weight="bold" />
+            New Sheet
+          </button>
+        </div>
       </div>
 
       {error && <div className="form-error">{error}</div>}
 
-      <div className="sheets-nav-bar">
-        {sheets.map((s) => (
+      {/* Groups Category Bar */}
+      <div style={{ margin: '4px 0 14px' }}>
+        <div className="text-xs bold muted" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
+          Topic Groups
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
           <button
-            key={s.id}
             type="button"
-            className={`sheet-nav-pill ${selectedSheetId === s.id ? 'active' : ''}`}
-            onClick={() => setSelectedSheetId(s.id)}
+            className={`sheet-nav-pill ${selectedGroupId === 'all' ? 'active' : ''}`}
+            onClick={() => setSelectedGroupId('all')}
           >
-            {s.is_private ? (
-              <Lock size={13} color="var(--pending)" weight="bold" />
-            ) : (
-              <FolderSimple size={14} weight={selectedSheetId === s.id ? 'fill' : 'regular'} />
-            )}
-            <span className="sheet-nav-name">{s.name}</span>
-            <span className="sheet-nav-count mono">{s.problem_count || 0}</span>
+            <FolderSimple size={14} weight={selectedGroupId === 'all' ? 'fill' : 'regular'} />
+            <span className="sheet-nav-name">All Sheets</span>
+            <span className="sheet-nav-count mono">{sheets.length}</span>
           </button>
-        ))}
-        {sheets.length === 0 && (
-          <div className="muted text-sm">No sheets yet. Create your first problem sheet!</div>
-        )}
+
+          {groups.map((g) => (
+            <div key={g.id} style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <button
+                type="button"
+                className={`sheet-nav-pill ${String(selectedGroupId) === String(g.id) ? 'active' : ''}`}
+                onClick={() => setSelectedGroupId(String(g.id))}
+                title={g.description || g.name}
+              >
+                <FolderSimple size={14} weight={String(selectedGroupId) === String(g.id) ? 'fill' : 'regular'} />
+                <span className="sheet-nav-name">{g.name}</span>
+                <span className="sheet-nav-count mono">{g.sheet_count || 0}</span>
+              </button>
+              {String(selectedGroupId) === String(g.id) && (
+                <button
+                  type="button"
+                  className="link-btn link-btn-danger"
+                  style={{ padding: '2px 6px', marginLeft: '-4px' }}
+                  onClick={() => handleDeleteGroup(g.id, g.name)}
+                  title="Delete this group"
+                >
+                  <Trash size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+
+          {hasUngrouped && groups.length > 0 && (
+            <button
+              type="button"
+              className={`sheet-nav-pill ${selectedGroupId === 'ungrouped' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupId('ungrouped')}
+            >
+              <span className="sheet-nav-name">General / Other</span>
+              <span className="sheet-nav-count mono">{sheets.filter((s) => !s.group_id).length}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Sub-Sheets Navigation Bar */}
+      <div style={{ margin: '8px 0 16px' }}>
+        <div className="text-xs bold muted" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
+          Sub-Sheets {selectedGroupId !== 'all' && selectedGroupId !== 'ungrouped' && groups.find((g) => String(g.id) === String(selectedGroupId)) ? `in ${groups.find((g) => String(g.id) === String(selectedGroupId)).name}` : ''}
+        </div>
+        <div className="sheets-nav-bar">
+          {filteredSheets.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className={`sheet-nav-pill ${selectedSheetId === s.id ? 'active' : ''}`}
+              onClick={() => setSelectedSheetId(s.id)}
+            >
+              {s.is_private ? (
+                <Lock size={13} color="var(--pending)" weight="bold" />
+              ) : (
+                <FolderSimple size={14} weight={selectedSheetId === s.id ? 'fill' : 'regular'} />
+              )}
+              <span className="sheet-nav-name">{s.name}</span>
+              <span className="sheet-nav-count mono">{s.problem_count || 0}</span>
+            </button>
+          ))}
+          {filteredSheets.length === 0 && (
+            <div className="muted text-sm">
+              {sheets.length === 0
+                ? 'No problem sheets created yet. Create a sheet to begin organizing problems!'
+                : 'No sheets in this group yet. Click "+ New Sheet" above to add one to this group!'}
+            </div>
+          )}
+        </div>
       </div>
 
       {selectedSheetId && sheetData && (
@@ -960,6 +1114,11 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <h3 className="sheet-heading" style={{ margin: 0 }}>{sheetData.name}</h3>
+                {sheetData.group_name && (
+                  <span className="badge-pending" style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px' }}>
+                    Group: {sheetData.group_name}
+                  </span>
+                )}
                 {sheetData.is_private && (
                   <span className="badge-private">
                     <Lock size={11} /> Private
@@ -1105,6 +1264,22 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
                     required
                   />
                 </label>
+                {groups.length > 0 && (
+                  <label style={{ marginTop: '12px' }}>
+                    Topic Group
+                    <select
+                      value={newSheetGroupId}
+                      onChange={(e) => setNewSheetGroupId(e.target.value)}
+                    >
+                      <option value="">— None (General) —</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div style={{ marginTop: '12px' }}>
                   <label className="checkbox-label">
                     <input
@@ -1152,6 +1327,59 @@ function SheetsPanel({ onPickProblem, onViewStatement, sheets, onRefreshSheets }
           onCancel={() => setPasskeyModalTarget(null)}
         />
       )}
+
+      {showCreateGroupModal && (
+        <div className="modal-backdrop" onClick={() => setShowCreateGroupModal(false)}>
+          <div className="modal-container modal-small" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Create Topic Group</div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setShowCreateGroupModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateGroup}>
+              <div className="modal-body">
+                {groupModalError && <div className="form-error">{groupModalError}</div>}
+                <label>
+                  Group Name
+                  <input
+                    type="text"
+                    placeholder="e.g. Graph Theory"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                </label>
+                <label style={{ marginTop: '12px' }}>
+                  Description (optional)
+                  <input
+                    type="text"
+                    placeholder="e.g. BFS, DFS, shortest paths…"
+                    value={newGroupDesc}
+                    onChange={(e) => setNewGroupDesc(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-text"
+                  onClick={() => setShowCreateGroupModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-small" disabled={actionBusy || !newGroupName.trim()}>
+                  Create Group
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1186,12 +1414,15 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
 
   const [formName, setFormName] = useState('')
   const [formSheetId, setFormSheetId] = useState('')
+  const [formProblemsDirect, setFormProblemsDirect] = useState('')
+  const [problemSource, setProblemSource] = useState('sheet')
   const [formStart, setFormStart] = useState('')
   const [formEnd, setFormEnd] = useState('')
   const [formPenalty, setFormPenalty] = useState(20)
   const [isPrivate, setIsPrivate] = useState(false)
   const [accessCode, setAccessCode] = useState('')
   const [creating, setCreating] = useState(false)
+  const [modalError, setModalError] = useState('')
   const [passkeyModalTarget, setPasskeyModalTarget] = useState(null)
   const unlockedContestCodesRef = useRef({})
 
@@ -1284,30 +1515,49 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
 
   async function handleCreateContest(e) {
     e.preventDefault()
-    if (!formName || !formSheetId || !formStart || !formEnd) return
-    setCreating(true)
+    setModalError('')
     setError('')
+    if (!formName.trim() || !formStart || !formEnd) {
+      setModalError('Please fill in all required fields.')
+      return
+    }
+    if (problemSource === 'sheet' && !formSheetId) {
+      setModalError('Please select a problem sheet or enter problem numbers directly.')
+      return
+    }
+    if (problemSource === 'direct' && !formProblemsDirect.trim()) {
+      setModalError('Please enter at least one problem number (e.g. 100, 10189).')
+      return
+    }
+    setCreating(true)
     try {
-      const res = await api.createContest({
-        name: formName,
-        sheet_id: Number(formSheetId),
+      const payload = {
+        name: formName.trim(),
         start_time: new Date(formStart).toISOString(),
         end_time: new Date(formEnd).toISOString(),
         penalty_minutes: Number(formPenalty) || 20,
         is_private: isPrivate,
         access_code: isPrivate ? accessCode.trim() : '',
-      })
+      }
+      if (problemSource === 'sheet') {
+        payload.sheet_id = Number(formSheetId)
+      } else {
+        payload.problem_numbers = formProblemsDirect.trim()
+      }
+      const res = await api.createContest(payload)
       setShowCreateModal(false)
       setFormName('')
       setFormSheetId('')
+      setFormProblemsDirect('')
       setFormStart('')
       setFormEnd('')
       setIsPrivate(false)
       setAccessCode('')
+      setModalError('')
       await loadContests()
       setActiveContestId(res.id)
     } catch (err) {
-      setError(err.message)
+      setModalError(err.message)
     } finally {
       setCreating(false)
     }
@@ -1333,7 +1583,9 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
     }
     setFormStart(toLocalISO(current))
     setFormEnd(toLocalISO(oneHourLater))
-    if (sheets.length > 0) setFormSheetId(String(sheets[0].id))
+    setProblemSource(sheets && sheets.length > 0 ? 'sheet' : 'direct')
+    if (sheets && sheets.length > 0) setFormSheetId(String(sheets[0].id))
+    setModalError('')
     setShowCreateModal(true)
   }
 
@@ -1483,7 +1735,6 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
               type="button"
               className="btn-small"
               onClick={openCreateModal}
-              disabled={sheets.length === 0}
             >
               <Plus size={14} weight="bold" />
               Create Contest
@@ -1491,11 +1742,6 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
           </div>
 
           {error && <div className="form-error">{error}</div>}
-          {sheets.length === 0 && (
-            <div className="form-note">
-              Note: You need at least one problem sheet before creating a contest.
-            </div>
-          )}
 
           <div className="table-wrap">
             <table>
@@ -1591,6 +1837,11 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
             </div>
             <form onSubmit={handleCreateContest}>
               <div className="modal-body">
+                {modalError && (
+                  <div className="form-error" style={{ marginBottom: '14px' }}>
+                    {modalError}
+                  </div>
+                )}
                 <label>
                   Contest Name
                   <input
@@ -1601,20 +1852,63 @@ function ContestsPanel({ onPickProblem, onViewStatement, sheets }) {
                     required
                   />
                 </label>
-                <label>
-                  Problem Sheet
-                  <select
-                    value={formSheetId}
-                    onChange={(e) => setFormSheetId(e.target.value)}
-                    required
-                  >
-                    {sheets.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.problem_count || 0} problems)
-                      </option>
-                    ))}
-                  </select>
-                </label>
+
+                <div style={{ margin: '8px 0 12px' }}>
+                  <span className="text-xs bold muted" style={{ display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>
+                    Problem Set Source
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className={`sheet-nav-pill ${problemSource === 'sheet' ? 'active' : ''}`}
+                      style={{ cursor: sheets.length === 0 ? 'not-allowed' : 'pointer', opacity: sheets.length === 0 ? 0.6 : 1 }}
+                      onClick={() => sheets.length > 0 && setProblemSource('sheet')}
+                    >
+                      <FolderSimple size={14} />
+                      <span>Existing Sheet {sheets.length === 0 ? '(0)' : `(${sheets.length})`}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`sheet-nav-pill ${problemSource === 'direct' ? 'active' : ''}`}
+                      onClick={() => setProblemSource('direct')}
+                    >
+                      <Code size={14} />
+                      <span>Enter Problem #s Directly</span>
+                    </button>
+                  </div>
+                </div>
+
+                {problemSource === 'sheet' && sheets.length > 0 ? (
+                  <label>
+                    Problem Sheet
+                    <select
+                      value={formSheetId}
+                      onChange={(e) => setFormSheetId(e.target.value)}
+                      required
+                    >
+                      {sheets.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.problem_count || 0} problems)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <label>
+                    UVa Problem Numbers
+                    <input
+                      type="text"
+                      placeholder="e.g. 100, 10189, 10004, 108"
+                      value={formProblemsDirect}
+                      onChange={(e) => setFormProblemsDirect(e.target.value)}
+                      required
+                    />
+                    <span className="muted text-xs" style={{ marginTop: '2px' }}>
+                      Comma or space separated UVa problem numbers. A contest sheet will be auto-generated.
+                    </span>
+                  </label>
+                )}
+
                 <div className="field-row">
                   <label>
                     Start Time
@@ -1892,10 +2186,11 @@ function SubmissionsPanel() {
 // Solved Problems Panel
 // ---------------------------------------------------------------------------
 
-function SolvedPanel({ onPickProblem }) {
+function SolvedPanel({ onPickProblem, onViewStatement }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -1906,42 +2201,128 @@ function SolvedPanel({ onPickProblem }) {
       .finally(() => setLoading(false))
   }, [])
 
+  const problems = data?.solved_problems || []
+  const filtered = problems.filter((p) => {
+    if (!search.trim()) return true
+    const q = search.trim().toLowerCase()
+    return String(p.number).includes(q) || (p.title || '').toLowerCase().includes(q)
+  })
+
   return (
     <div className="panel">
       <div className="panel-head">
         <div>
           <h2>Solved Problems</h2>
           <div className="panel-sub">
-            Verified accepted problems cross-referenced with uHunt database
+            Verified accepted problems cross-referenced with your official UVa submission history
           </div>
         </div>
         {data && (
-          <span className="mono bold text-sm" style={{ color: 'var(--ok)' }}>
-            {data.total_solved} Accepted
-          </span>
+          <div className="badge-ok" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 14px', borderRadius: '20px' }}>
+            <CheckCircle size={16} weight="fill" />
+            <span className="mono bold">{data.total_solved || 0} Solved</span>
+          </div>
         )}
       </div>
 
       {error && <div className="form-error">{error}</div>}
-      {loading && <div className="muted text-sm">Querying uHunt profile…</div>}
 
-      {data && (
-        <div>
-          <div className="solved-grid">
-            {data.solved_problem_ids.map((pid) => (
-              <div key={pid} className="solved-pill">
-                <span className="mono bold">PID {pid}</span>
-                <button
-                  type="button"
-                  className="link-btn text-xs"
-                  onClick={() => onPickProblem(pid)}
-                  title="Code solution"
-                >
-                  Solve →
-                </button>
-              </div>
-            ))}
-          </div>
+      <div style={{ margin: '14px 0 18px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div className="search-bar" style={{ flex: 1, maxWidth: '400px' }}>
+          <MagnifyingGlass className="search-icon" size={16} />
+          <input
+            type="text"
+            placeholder="Search solved by title or # (e.g. 100, 3n+1)..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              type="button"
+              className="clear-search-btn"
+              onClick={() => setSearch('')}
+              title="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+        {search && (
+          <span className="muted text-xs mono">
+            {filtered.length} of {problems.length} shown
+          </span>
+        )}
+      </div>
+
+      {loading && <div className="muted text-sm">Querying uHunt profile & solved problems…</div>}
+
+      {!loading && data && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: '50px', textAlign: 'center' }}>Status</th>
+                <th className="mono" style={{ width: '90px' }}>#</th>
+                <th>Problem Title</th>
+                <th className="mono" style={{ width: '130px' }}>Distinct Solvers</th>
+                <th style={{ width: '220px', textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p) => (
+                <tr key={p.id || p.number}>
+                  <td style={{ textAlign: 'center' }}>
+                    <CheckCircle size={18} color="var(--ok)" weight="fill" />
+                  </td>
+                  <td className="mono bold" style={{ color: 'var(--accent)' }}>
+                    #{p.number}
+                  </td>
+                  <td className="bold">
+                    <span
+                      className="link-btn-text"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => onViewStatement?.(p.number, p.title)}
+                      title="View problem statement"
+                    >
+                      {p.title}
+                    </span>
+                  </td>
+                  <td className="mono muted text-sm">
+                    {p.dacu ? p.dacu.toLocaleString() : '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div className="row-actions" style={{ justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn-text text-xs"
+                        onClick={() => onViewStatement?.(p.number, p.title)}
+                        title="Read statement"
+                      >
+                        <FileText size={13} />
+                        Statement
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-small"
+                        onClick={() => onPickProblem(p.number)}
+                        title="Submit code for this problem"
+                      >
+                        <PaperPlaneTilt size={13} />
+                        Solve Again
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    {search ? 'No solved problems matching your search.' : 'No solved problems found on this UVa account yet. Pick a problem and submit to get started!'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -2883,6 +3264,469 @@ function LandingPage({ onLoginClick, onExploreProblems, onExploreContests, onExp
 }
 
 // ---------------------------------------------------------------------------
+// Teams Panel (ICPC Competitive Teams & Peer Tracker)
+// ---------------------------------------------------------------------------
+
+function TeamsPanel({ currentUsername }) {
+  const [teams, setTeams] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [selectedTeamId, setSelectedTeamId] = useState(null)
+  const [teamDetail, setTeamDetail] = useState(null)
+  const [loadingDetail, setLoadingDetail] = useState(false)
+
+  // Create team modal
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newTeamName, setNewTeamName] = useState('')
+  const [newTeamDesc, setNewTeamDesc] = useState('')
+  const [createError, setCreateError] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+
+  // Add member
+  const [newMemberUsername, setNewMemberUsername] = useState('')
+  const [addMemberBusy, setAddMemberBusy] = useState(false)
+  const [memberError, setMemberError] = useState('')
+
+  async function loadTeams() {
+    setLoading(true)
+    setError('')
+    try {
+      const data = await api.getTeams()
+      setTeams(data || [])
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function loadDetail(teamId) {
+    setLoadingDetail(true)
+    setMemberError('')
+    try {
+      const data = await api.getTeam(teamId)
+      setTeamDetail(data)
+    } catch (err) {
+      setError(err.message)
+      setTeamDetail(null)
+    } finally {
+      setLoadingDetail(false)
+    }
+  }
+
+  useEffect(() => {
+    loadTeams()
+  }, [])
+
+  useEffect(() => {
+    if (selectedTeamId) {
+      loadDetail(selectedTeamId)
+    } else {
+      setTeamDetail(null)
+    }
+  }, [selectedTeamId])
+
+  async function handleCreateTeam(e) {
+    e.preventDefault()
+    if (!newTeamName.trim()) return
+    setCreateBusy(true)
+    setCreateError('')
+    try {
+      const created = await api.createTeam({
+        name: newTeamName.trim(),
+        description: newTeamDesc.trim(),
+      })
+      setShowCreateModal(false)
+      setNewTeamName('')
+      setNewTeamDesc('')
+      await loadTeams()
+      if (created?.id) {
+        setSelectedTeamId(created.id)
+      }
+    } catch (err) {
+      setCreateError(err.message)
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
+  async function handleDeleteTeam(id, name) {
+    if (!window.confirm(`Are you sure you want to disband team "${name}"? This cannot be undone.`)) return
+    try {
+      await api.deleteTeam(id)
+      if (selectedTeamId === id) {
+        setSelectedTeamId(null)
+      }
+      await loadTeams()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleAddMember(e) {
+    e.preventDefault()
+    if (!newMemberUsername.trim() || !selectedTeamId) return
+    setAddMemberBusy(true)
+    setMemberError('')
+    try {
+      await api.addTeamMember(selectedTeamId, newMemberUsername.trim())
+      setNewMemberUsername('')
+      await loadDetail(selectedTeamId)
+      await loadTeams()
+    } catch (err) {
+      setMemberError(err.message)
+    } finally {
+      setAddMemberBusy(false)
+    }
+  }
+
+  async function handleRemoveMember(u) {
+    const isSelf = u.toLowerCase() === (currentUsername || '').toLowerCase()
+    const promptMsg = isSelf
+      ? 'Are you sure you want to leave this team?'
+      : `Remove ${u} from this team?`
+    if (!window.confirm(promptMsg)) return
+    try {
+      await api.removeTeamMember(selectedTeamId, u)
+      if (isSelf) {
+        await loadTeams()
+        setSelectedTeamId(null)
+      } else {
+        await loadDetail(selectedTeamId)
+        await loadTeams()
+      }
+    } catch (err) {
+      setMemberError(err.message)
+    }
+  }
+
+  const isOwner = teamDetail && (teamDetail.created_by?.toLowerCase() === (currentUsername || '').toLowerCase())
+
+  return (
+    <div className="panel">
+      {/* Top Header */}
+      <div className="panel-head">
+        <div>
+          <h2>ICPC Teams &amp; Rosters</h2>
+          <div className="panel-sub">
+            Form training rosters, track solved counts across teammates, and prepare for contest simulations.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {selectedTeamId && (
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              onClick={() => setSelectedTeamId(null)}
+            >
+              &larr; All Teams
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-small"
+            onClick={() => {
+              setCreateError('')
+              setShowCreateModal(true)
+            }}
+          >
+            <Plus size={14} weight="bold" />
+            <span>Create Team</span>
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="form-error" style={{ marginBottom: '16px' }}>{error}</div>}
+
+      {/* Selected Team Detail View */}
+      {selectedTeamId ? (
+        loadingDetail || !teamDetail ? (
+          <div className="empty" style={{ padding: '40px' }}>Loading team details…</div>
+        ) : (
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                padding: '16px',
+                background: 'var(--surface-hover)',
+                borderRadius: '8px',
+                marginBottom: '20px',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <h3 style={{ margin: 0, fontSize: '18px' }}>{teamDetail.name}</h3>
+                  <span className="chip text-xs">
+                    {teamDetail.members?.length || 0} {teamDetail.members?.length === 1 ? 'member' : 'members'}
+                  </span>
+                </div>
+                {teamDetail.description && (
+                  <p className="muted text-sm" style={{ margin: '6px 0 0' }}>
+                    {teamDetail.description}
+                  </p>
+                )}
+                <div className="text-xs muted" style={{ marginTop: '8px' }}>
+                  Managed by <strong style={{ color: 'var(--text)' }}>{teamDetail.created_by}</strong>
+                </div>
+              </div>
+
+              {isOwner && (
+                <button
+                  type="button"
+                  className="link-btn link-btn-danger text-xs"
+                  onClick={() => handleDeleteTeam(teamDetail.id, teamDetail.name)}
+                  title="Disband this team"
+                >
+                  <Trash size={14} />
+                  <span>Disband Team</span>
+                </button>
+              )}
+            </div>
+
+            {/* Add Member form */}
+            <div style={{ marginBottom: '16px' }}>
+              <form className="sheet-quick-add" onSubmit={handleAddMember}>
+                <input
+                  placeholder="UVa Username to add…"
+                  value={newMemberUsername}
+                  onChange={(e) => setNewMemberUsername(e.target.value)}
+                  style={{ width: '220px' }}
+                  required
+                />
+                <button type="submit" className="btn-small" disabled={addMemberBusy}>
+                  <UserPlus size={14} weight="bold" />
+                  <span>{addMemberBusy ? 'Adding…' : 'Add Member'}</span>
+                </button>
+              </form>
+              {memberError && (
+                <div className="form-error" style={{ marginTop: '8px', maxWidth: '400px' }}>
+                  {memberError}
+                </div>
+              )}
+            </div>
+
+            {/* Team Roster Table */}
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Role</th>
+                    <th className="mono" style={{ textAlign: 'right' }}>UVa Solved</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamDetail.members?.map((m) => {
+                    const isMe = m.username?.toLowerCase() === (currentUsername || '').toLowerCase()
+                    return (
+                      <tr key={m.username}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div
+                              style={{
+                                width: '26px',
+                                height: '26px',
+                                borderRadius: '50%',
+                                background: 'var(--accent-glow)',
+                                color: 'var(--accent)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 700,
+                                fontSize: '11px',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {m.username.slice(0, 2)}
+                            </div>
+                            <span className="bold">{m.username}</span>
+                            {isMe && <span className="chip text-xs">You</span>}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            className={`chip text-xs ${
+                              m.role === 'owner' ? 'chip-primary' : ''
+                            }`}
+                          >
+                            {m.role === 'owner' ? 'Team Captain' : 'Contestant'}
+                          </span>
+                        </td>
+                        <td className="mono bold" style={{ textAlign: 'right', color: 'var(--accent)' }}>
+                          {m.solved_count != null ? m.solved_count : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {(isOwner || isMe) && m.role !== 'owner' && (
+                            <button
+                              type="button"
+                              className="link-btn link-btn-danger text-xs"
+                              onClick={() => handleRemoveMember(m.username)}
+                            >
+                              <Trash size={13} />
+                              <span>{isMe ? 'Leave' : 'Remove'}</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {(!teamDetail.members || teamDetail.members.length === 0) && (
+                    <tr>
+                      <td colSpan={4} className="empty">
+                        No members in this team yet. Add members using the input above!
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      ) : (
+        /* Team List View */
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Team Name</th>
+                <th>Description</th>
+                <th>Captain</th>
+                <th className="mono" style={{ textAlign: 'right' }}>Roster</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teams.map((t) => {
+                const userIsOwner =
+                  t.created_by?.toLowerCase() === (currentUsername || '').toLowerCase()
+                return (
+                  <tr
+                    key={t.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setSelectedTeamId(t.id)}
+                  >
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <UsersThree size={16} color="var(--accent)" />
+                        <span className="bold" style={{ color: 'var(--text)' }}>
+                          {t.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="muted text-sm">{t.description || '—'}</td>
+                    <td>
+                      <span className="text-sm">
+                        {t.created_by}
+                        {userIsOwner ? ' (You)' : ''}
+                      </span>
+                    </td>
+                    <td className="mono" style={{ textAlign: 'right' }}>
+                      <span className="chip text-xs">
+                        {t.member_count} {t.member_count === 1 ? 'member' : 'members'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                      <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="link-btn text-xs"
+                          onClick={() => setSelectedTeamId(t.id)}
+                        >
+                          View Roster &rarr;
+                        </button>
+                        {userIsOwner && (
+                          <button
+                            type="button"
+                            className="link-btn link-btn-danger text-xs"
+                            onClick={() => handleDeleteTeam(t.id, t.name)}
+                            title="Disband team"
+                          >
+                            <Trash size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+              {teams.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={5} className="empty">
+                    No teams found. Click "Create Team" to form an ICPC roster!
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Create Team Modal */}
+      {showCreateModal && (
+        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
+          <div className="modal-container modal-small" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Create Competitive Team</div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setShowCreateModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateTeam}>
+              <div className="modal-body">
+                {createError && <div className="form-error">{createError}</div>}
+                <label>
+                  Team Name
+                  <input
+                    type="text"
+                    placeholder="e.g. ZC ICPC Team Alpha"
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                </label>
+                <label style={{ marginTop: '12px' }}>
+                  Description (optional)
+                  <input
+                    type="text"
+                    placeholder="e.g. Training for ACPC 2026 Regionals"
+                    value={newTeamDesc}
+                    onChange={(e) => setNewTeamDesc(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-text"
+                  onClick={() => setShowCreateModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-small"
+                  disabled={createBusy || !newTeamName.trim()}
+                >
+                  {createBusy ? 'Creating…' : 'Create Team'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard Navigation & Layout
 // ---------------------------------------------------------------------------
 
@@ -2893,6 +3737,7 @@ const TABS = [
   { key: 'submit', label: 'Submit', icon: PaperPlaneTilt },
   { key: 'submissions', label: 'Submissions', icon: ClockCounterClockwise },
   { key: 'solved', label: 'Solved', icon: CheckCircle },
+  { key: 'teams', label: 'Teams', icon: UsersThree },
   { key: 'profile', label: 'Profile', icon: User },
   { key: 'about', label: 'About', icon: Info },
 ]
@@ -3018,7 +3863,13 @@ function Dashboard({ username, onLogout }) {
           />
         )}
         {tab === 'submissions' && <SubmissionsPanel />}
-        {tab === 'solved' && <SolvedPanel onPickProblem={pickProblem} />}
+        {tab === 'solved' && (
+          <SolvedPanel
+            onPickProblem={pickProblem}
+            onViewStatement={viewStatement}
+          />
+        )}
+        {tab === 'teams' && <TeamsPanel currentUsername={username} />}
         {tab === 'profile' && (
           <ProfilePanel
             onViewStatement={viewStatement}
