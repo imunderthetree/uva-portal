@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 import logging
 import os
 import time
+from urllib.parse import urlparse
 import uuid
 
 try:
@@ -14,6 +15,7 @@ except ImportError:
 import requests
 from flask import Flask, jsonify, request, session, send_file
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import db
 import uhunt
@@ -83,6 +85,10 @@ def parse_dt(dt_val):
 
 
 app = Flask(__name__)
+if IS_PROD:
+    # Handle reverse proxy headers (Fly.io / Render / nginx / load balancers)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(32)
 
 # Secure session cookies
@@ -128,8 +134,24 @@ def bot_and_origin_guard():
         if not app.testing:
             origin = request.headers.get("Origin")
             if origin:
-                allowed_origins = {FRONTEND_ORIGIN.rstrip("/"), request.host_url.rstrip("/")}
-                if origin.rstrip("/") not in allowed_origins:
+                origin_clean = origin.rstrip("/").lower()
+                origin_domain = urlparse(origin).netloc.lower().split(":")[0]
+
+                req_host = (request.headers.get("X-Forwarded-Host") or request.host or "").lower()
+                req_host_domain = req_host.split(":")[0]
+
+                allowed_origins = {
+                    FRONTEND_ORIGIN.rstrip("/").lower(),
+                    request.host_url.rstrip("/").lower(),
+                    f"https://{req_host}",
+                    f"http://{req_host}",
+                }
+
+                if origin_clean not in allowed_origins and origin_domain != req_host_domain:
+                    logger.warning(
+                        f"Origin check failed: origin={origin}, host_url={request.host_url}, "
+                        f"req_host={req_host}, allowed={allowed_origins}"
+                    )
                     return jsonify({"error": "Forbidden: Origin verification failed."}), 403
 
 

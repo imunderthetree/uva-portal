@@ -311,8 +311,41 @@ class BackendTestCase(unittest.TestCase):
         self.assertEqual(sub["problem_number"], 100)
         self.assertIn("#include", sub["code"])
 
+    def test_origin_verification_behind_proxy(self):
+        # Temporarily enable bot guard by setting testing = False
+        app.testing = False
+        try:
+            # Same origin via proxy (HTTPS origin, proxied host)
+            res = self.client.post(
+                "/api/login",
+                json={"username": "a", "password": "b"},
+                headers={
+                    "Origin": "https://uva-portal.fly.dev",
+                    "X-Forwarded-Host": "uva-portal.fly.dev",
+                    "X-Forwarded-Proto": "https",
+                }
+            )
+            # Should not be 403 Forbidden Origin verification failed (will be 401 or 400 from login)
+            self.assertNotEqual(res.status_code, 403)
+
+            # Untrusted cross-origin request
+            evil_res = self.client.post(
+                "/api/login",
+                json={"username": "a", "password": "b"},
+                headers={
+                    "Origin": "https://attacker.evil.com",
+                    "X-Forwarded-Host": "uva-portal.fly.dev",
+                    "X-Forwarded-Proto": "https",
+                }
+            )
+            self.assertEqual(evil_res.status_code, 403)
+            self.assertIn("Origin verification failed", evil_res.get_json()["error"])
+        finally:
+            app.testing = True
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
