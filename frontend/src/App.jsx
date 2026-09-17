@@ -7,10 +7,16 @@ import {
   Clock,
   ClockCounterClockwise,
   Code,
+  EnvelopeSimple,
   FileText,
   FolderSimple,
+  GithubLogo,
+  GraduationCap,
   House,
+  Info,
   Key,
+  Lightning,
+  LinkedinLogo,
   Lock,
   LockOpen,
   MagnifyingGlass,
@@ -2367,7 +2373,196 @@ const MOCKUP_CODE = [
   { n: 35, tokens: [{ t: '}' }] },
 ]
 
-function LandingPage({ onLoginClick, onExploreProblems, onExploreContests, onViewStatement, onPickProblem }) {
+// ---------------------------------------------------------------------------
+// About Page (Developer Info & Portfolio)
+// ---------------------------------------------------------------------------
+
+function AboutPanel() {
+  const socialLinks = [
+    {
+      name: 'Portfolio',
+      url: 'https://yusufmohammaddsai.vercel.app/',
+      handle: 'yusufmohammaddsai.vercel.app',
+      icon: ArrowSquareOut,
+      primary: true,
+    },
+    {
+      name: 'GitHub',
+      url: 'https://github.com/imunderthetree',
+      handle: 'github.com/imunderthetree',
+      icon: GithubLogo,
+    },
+    {
+      name: 'LinkedIn',
+      url: 'https://linkedin.com/in/yusufmohammaddsai',
+      handle: 'linkedin.com/in/yusufmohammaddsai',
+      icon: LinkedinLogo,
+    },
+    {
+      name: 'Codeforces',
+      url: 'https://codeforces.com/profile/cloudielst',
+      handle: 'cf/cloudielst',
+      icon: Code,
+    },
+    {
+      name: 'LeetCode',
+      url: 'https://leetcode.com/u/joeisunderthetree',
+      handle: 'lc/joeisunderthetree',
+      icon: Trophy,
+    },
+    {
+      name: 'Email',
+      url: 'mailto:yusufalazhar7@gmail.com',
+      handle: 'yusufalazhar7@gmail.com',
+      icon: EnvelopeSimple,
+    },
+  ]
+
+  const stats = [
+    { num: '10+', label: 'Software Projects Shipped' },
+    { num: '150+', label: 'ICPC Applicants Coached / Season' },
+    { num: '200+', label: 'Developer Conference Attendees' },
+    { num: '10,000+', label: 'UVa Problems Indexed & Cached' },
+  ]
+
+  return (
+    <div className="about-panel">
+      {/* Creator Spotlight Header Card */}
+      <div className="about-hero-card">
+        <div className="about-user-group">
+          <div className="about-avatar-circle">
+            <User size={38} weight="bold" />
+          </div>
+          <div className="about-names">
+            <div className="about-status-strip">
+              <span className="status-dot" />
+              <span className="mono text-xs">Creator & ICPC Community Leader</span>
+            </div>
+            <h2>Yusuf Mohammad</h2>
+            <p className="muted">
+              Data Science & AI student at <strong>Zewail City of Science and Technology</strong> • ICPC ZC Community Leader • IEEE CS Vice Head
+            </p>
+          </div>
+        </div>
+
+        <div className="about-cta-box">
+          <a
+            href="https://yusufmohammaddsai.vercel.app/"
+            target="_blank"
+            rel="noreferrer"
+            className="portfolio-hero-btn"
+          >
+            <Sparkle size={18} weight="fill" />
+            <span>Visit Full Portfolio</span>
+            <ArrowSquareOut size={16} weight="bold" />
+          </a>
+          <span className="text-xs muted mono">yusufmohammaddsai.vercel.app</span>
+        </div>
+      </div>
+
+      {/* Metrics Row */}
+      <div className="about-stats-grid">
+        {stats.map((s, i) => (
+          <div key={i} className="about-stat-card">
+            <div className="about-stat-num mono">{s.num}</div>
+            <div className="about-stat-label">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Two Column Grid: About the Creator & About the UVa Portal Project */}
+      <div className="about-content-grid">
+        {/* Left Column: Creator Story & Leadership */}
+        <div className="about-card">
+          <div className="about-card-head">
+            <GraduationCap size={20} className="accent-icon" />
+            <h3>About the Developer</h3>
+          </div>
+          <p>
+            I am a Data Science & AI undergraduate at Zewail City, specializing in machine learning systems, high-performance computing, and competitive algorithms.
+          </p>
+          <p>
+            As <strong>ICPC ZC Community Leader</strong>, I established our campus competitive programming culture—designing training curricula, mentoring over 150+ applicants each season, and fostering algorithmic problem-solving. As <strong>IEEE CS Vice Head</strong>, I co-organized major developer conferences including APPX 2025 with 200+ attendees.
+          </p>
+          <p>
+            I believe software engineering and competitive programming share the same foundation: breaking down complex, high-friction problems into elegant, robust, and lightning-fast solutions.
+          </p>
+
+          <h4 style={{ marginTop: '20px', marginBottom: '12px', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.04em' }} className="muted mono">
+            Connect & Profiles
+          </h4>
+          <div className="about-social-grid">
+            {socialLinks.map((l) => {
+              const Icon = l.icon
+              return (
+                <a
+                  key={l.name}
+                  href={l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`about-social-pill ${l.primary ? 'primary' : ''}`}
+                >
+                  <Icon size={16} weight={l.primary ? 'fill' : 'regular'} />
+                  <div>
+                    <div className="social-name">{l.name}</div>
+                    <div className="social-handle mono">{l.handle}</div>
+                  </div>
+                  <ArrowSquareOut size={13} className="external-arrow" />
+                </a>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Right Column: The UVa Judge Portal Story */}
+        <div className="about-card">
+          <div className="about-card-head">
+            <Lightning size={20} className="accent-icon" />
+            <h3>Why UVa Judge Portal?</h3>
+          </div>
+          <p>
+            UVa Online Judge is one of the most respected repositories in competitive programming history, housing over 10,000 algorithmic problems that defined ICPC Regionals and World Finals for decades.
+          </p>
+          <p>
+            However, the legacy 1990s portal suffered from modern web friction: popup blockers intercepting PDF problem statements, broken session redirects, no live judge queue feedback, and no way to organize custom team practice sheets.
+          </p>
+          <p>
+            <strong>UVa Judge Portal</strong> was designed to revitalize this legendary archive for modern contestants:
+          </p>
+          <ul className="about-feature-list">
+            <li>
+              <strong>Split-Screen In-Portal Statements:</strong> Server-proxied and cached PDFs rendered right alongside your editor.
+            </li>
+            <li>
+              <strong>Live Async Verdict Streaming:</strong> Instant judgment feedback polling without manual page reloads.
+            </li>
+            <li>
+              <strong>Private Sheets with Passkeys:</strong> Curate training problem sets with access-code protection.
+            </li>
+            <li>
+              <strong>Timed ICPC Contests:</strong> Realistic contest simulation with countdown clocks, scoreboards, and 20-min ACM penalty math.
+            </li>
+            <li>
+              <strong>Persistent Code Archival:</strong> Review and copy past submissions directly from your submission log.
+            </li>
+          </ul>
+
+          <div className="about-tech-strip">
+            <span className="mono text-xs muted">Built with:</span>
+            <span className="chip text-xs">React 18</span>
+            <span className="chip text-xs">Vite</span>
+            <span className="chip text-xs">Python 3.11</span>
+            <span className="chip text-xs">Flask</span>
+            <span className="chip text-xs">SQLite WAL</span>
+            <span className="chip text-xs">Fly.io</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LandingPage({ onLoginClick, onExploreProblems, onExploreContests, onExploreAbout, onViewStatement, onPickProblem }) {
   const previewProblems = [
     { number: 100, title: 'The 3n + 1 problem', topic: 'Algorithm / Math', dacu: 72400 },
     { number: 10189, title: 'Minesweeper', topic: 'Simulation / Grid', dacu: 38200 },
@@ -2394,6 +2589,9 @@ function LandingPage({ onLoginClick, onExploreProblems, onExploreContests, onVie
           </button>
           <button type="button" className="link-btn text-sm" onClick={onExploreContests}>
             Contests
+          </button>
+          <button type="button" className="link-btn text-sm" onClick={onExploreAbout}>
+            About
           </button>
           <button type="button" className="btn-small" onClick={onLoginClick}>
             Sign In with UVa
@@ -2646,6 +2844,40 @@ function LandingPage({ onLoginClick, onExploreProblems, onExploreContests, onVie
           </table>
         </div>
       </section>
+
+      {/* Landing Footer */}
+      <footer className="landing-footer">
+        <div className="landing-footer-inner">
+          <div className="landing-brand">
+            <img src="/logo.svg" alt="UVa Logo" className="app-logo-icon" />
+            <span className="bold">UVa Judge Portal</span>
+          </div>
+          <div className="landing-footer-links">
+            <button type="button" className="link-btn text-xs muted" onClick={onExploreProblems}>
+              Problems
+            </button>
+            <button type="button" className="link-btn text-xs muted" onClick={onExploreContests}>
+              Contests
+            </button>
+            <button type="button" className="link-btn text-xs muted" onClick={onExploreAbout}>
+              About Developer
+            </button>
+            <a
+              href="https://yusufmohammaddsai.vercel.app/"
+              target="_blank"
+              rel="noreferrer"
+              className="link-btn text-xs"
+              style={{ color: '#e07a2f', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            >
+              <span>Portfolio</span>
+              <ArrowSquareOut size={13} />
+            </a>
+          </div>
+          <div className="text-xs muted mono">
+            Engineered by <strong style={{ color: 'var(--text)' }}>Yusuf Mohammad</strong> • ICPC ZC Leader
+          </div>
+        </div>
+      </footer>
     </div>
   )
 }
@@ -2662,6 +2894,7 @@ const TABS = [
   { key: 'submissions', label: 'Submissions', icon: ClockCounterClockwise },
   { key: 'solved', label: 'Solved', icon: CheckCircle },
   { key: 'profile', label: 'Profile', icon: User },
+  { key: 'about', label: 'About', icon: Info },
 ]
 
 function Dashboard({ username, onLogout }) {
@@ -2792,6 +3025,7 @@ function Dashboard({ username, onLogout }) {
             onPickProblem={pickProblem}
           />
         )}
+        {tab === 'about' && <AboutPanel />}
       </main>
 
       {/* Global In-Portal Problem Statement Drawer */}
@@ -2870,7 +3104,7 @@ export default function App() {
   }
 
   if (status === 'anon') {
-    if (guestTab === 'problems') {
+    if (guestTab === 'problems' || guestTab === 'contests' || guestTab === 'about') {
       return (
         <div className="dashboard">
           <aside className="rail">
@@ -2897,67 +3131,9 @@ export default function App() {
                 <Trophy className="rail-icon" />
                 <span>Contests</span>
               </button>
-            </nav>
-            <div className="rail-foot">
-              <button type="button" className="btn-small" style={{ width: '100%' }} onClick={() => setShowLoginModal(true)}>
-                Sign In
-              </button>
-            </div>
-          </aside>
-          <main className="content">
-            <ProblemsPanel
-              onPickProblem={pickProblem}
-              onViewStatement={viewStatement}
-              sheets={sheets}
-              onRefreshSheets={() => api.getSheets().then(setSheets).catch(() => {})}
-            />
-          </main>
-          {statementProblem && (
-            <StatementDrawer
-              problemNumber={statementProblem.number}
-              problemTitle={statementProblem.title}
-              onClose={() => setStatementProblem(null)}
-              onSubmitProblem={pickProblem}
-            />
-          )}
-          <LoginModal
-            isOpen={showLoginModal}
-            onClose={() => setShowLoginModal(false)}
-            onLoggedIn={(u) => {
-              setUsername(u)
-              setStatus('in')
-            }}
-          />
-        </div>
-      )
-    }
-
-    if (guestTab === 'contests') {
-      return (
-        <div className="dashboard">
-          <aside className="rail">
-            <div className="rail-brand" onClick={() => setGuestTab('home')} style={{ cursor: 'pointer' }}>
-              <div className="rail-mark">
-                <img src="/logo.svg" alt="UVa Logo" className="app-logo-icon" />
-                <span>Judge</span>
-              </div>
-              <div className="status-dot-wrap">
-                <span className="status-dot" />
-                <span>Guest</span>
-              </div>
-            </div>
-            <nav>
-              <button className={`rail-btn ${guestTab === 'home' ? 'active' : ''}`} onClick={() => setGuestTab('home')}>
-                <House className="rail-icon" />
-                <span>Home</span>
-              </button>
-              <button className={`rail-btn ${guestTab === 'problems' ? 'active' : ''}`} onClick={() => setGuestTab('problems')}>
-                <Code className="rail-icon" />
-                <span>Problems</span>
-              </button>
-              <button className={`rail-btn ${guestTab === 'contests' ? 'active' : ''}`} onClick={() => setGuestTab('contests')}>
-                <Trophy className="rail-icon" />
-                <span>Contests</span>
+              <button className={`rail-btn ${guestTab === 'about' ? 'active' : ''}`} onClick={() => setGuestTab('about')}>
+                <Info className="rail-icon" />
+                <span>About</span>
               </button>
             </nav>
             <div className="rail-foot">
@@ -2967,11 +3143,33 @@ export default function App() {
             </div>
           </aside>
           <main className="content">
-            <ContestsPanel
-              onPickProblem={pickProblem}
-              onViewStatement={viewStatement}
-              sheets={sheets}
-            />
+            <header className="app-topbar">
+              <div className="breadcrumbs">
+                <span className="breadcrumb-root" onClick={() => setGuestTab('home')} style={{ cursor: 'pointer' }}>
+                  UVa Judge
+                </span>
+                <span className="breadcrumb-sep">/</span>
+                <span className="breadcrumb-current">
+                  {guestTab.charAt(0).toUpperCase() + guestTab.slice(1)}
+                </span>
+              </div>
+            </header>
+            {guestTab === 'problems' && (
+              <ProblemsPanel
+                onPickProblem={pickProblem}
+                onViewStatement={viewStatement}
+                sheets={sheets}
+                onRefreshSheets={() => api.getSheets().then(setSheets).catch(() => {})}
+              />
+            )}
+            {guestTab === 'contests' && (
+              <ContestsPanel
+                onPickProblem={pickProblem}
+                onViewStatement={viewStatement}
+                sheets={sheets}
+              />
+            )}
+            {guestTab === 'about' && <AboutPanel />}
           </main>
           {statementProblem && (
             <StatementDrawer
@@ -2999,6 +3197,7 @@ export default function App() {
           onLoginClick={() => setShowLoginModal(true)}
           onExploreProblems={() => setGuestTab('problems')}
           onExploreContests={() => setGuestTab('contests')}
+          onExploreAbout={() => setGuestTab('about')}
           onViewStatement={viewStatement}
           onPickProblem={pickProblem}
         />
