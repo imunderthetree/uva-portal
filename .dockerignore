@@ -1,0 +1,26 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+backend/venv
+backend/test_*.db
+backend/test_*.py
+
+# Node / Frontend
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Environment / local configs
+.env
+*.log
+
+# Antigravity artifacts
+.gemini
+

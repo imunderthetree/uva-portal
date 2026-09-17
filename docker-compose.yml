@@ -1,0 +1,24 @@
+services:
+  uva-portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: uva_judge_portal
+    ports:
+      - "8080:8080"
+    environment:
+      - FLASK_ENV=production
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-uva-portal-prod-secret-key-32-bytes-long}
+      - DATA_DIR=/data
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:8080}
+    volumes:
+      # Persistent storage volume for SQLite DB and cached PDFs
+      - ./uva_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
