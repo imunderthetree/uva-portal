@@ -35,13 +35,19 @@ export const api = {
     }
     return res
   },
-  login: async (username, password) => {
+  login: async (username, password, remember = true) => {
     const res = await request('/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, remember }),
     })
     if (res && res.sid) {
-      localStorage.setItem('uva_sid', res.sid)
+      if (remember) {
+        localStorage.setItem('uva_sid', res.sid)
+        sessionStorage.removeItem('uva_sid')
+      } else {
+        sessionStorage.setItem('uva_sid', res.sid)
+        localStorage.removeItem('uva_sid')
+      }
     }
     return res
   },

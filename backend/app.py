@@ -233,6 +233,7 @@ def login():
     data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
+    remember = bool(data.get("remember", True))
 
     if not username or not password:
         return jsonify({"error": "Username and password are required."}), 400
@@ -254,7 +255,7 @@ def login():
     sid = str(uuid.uuid4())
     CLIENTS[sid] = client
     session["sid"] = sid
-    session.permanent = True
+    session.permanent = remember
 
     try:
         uid = uhunt.get_uid(username) or 0

@@ -187,6 +187,7 @@ function PasskeyModal({ title, targetType, onUnlock, onCancel }) {
 function LoginModal({ isOpen, onClose, onLoggedIn }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [staySignedIn, setStaySignedIn] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -197,7 +198,7 @@ function LoginModal({ isOpen, onClose, onLoggedIn }) {
     setError('')
     setBusy(true)
     try {
-      const res = await api.login(username, password)
+      const res = await api.login(username, password, staySignedIn)
       onLoggedIn(res.username)
       onClose()
     } catch (err) {
@@ -248,6 +249,17 @@ function LoginModal({ isOpen, onClose, onLoggedIn }) {
               required
             />
           </label>
+          <div style={{ margin: '12px 0 16px', display: 'flex', alignItems: 'center' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, fontWeight: 'normal', fontSize: '13px', color: 'var(--text-muted)' }}>
+              <input
+                type="checkbox"
+                checked={staySignedIn}
+                onChange={(e) => setStaySignedIn(e.target.checked)}
+                style={{ width: '16px', height: '16px', margin: 0, cursor: 'pointer' }}
+              />
+              <span>Stay signed in on this device (30 days)</span>
+            </label>
+          </div>
           {error && <div className="form-error">{error}</div>}
           <button type="submit" disabled={busy}>
             {busy ? 'Connecting to UVa…' : 'Sign in to Judge'}
@@ -261,6 +273,7 @@ function LoginModal({ isOpen, onClose, onLoggedIn }) {
 function LoginScreen({ onLoggedIn, onBrowseAsGuest }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [staySignedIn, setStaySignedIn] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -269,7 +282,7 @@ function LoginScreen({ onLoggedIn, onBrowseAsGuest }) {
     setError('')
     setBusy(true)
     try {
-      const res = await api.login(username, password)
+      const res = await api.login(username, password, staySignedIn)
       onLoggedIn(res.username)
     } catch (err) {
       setError(err.message)
@@ -311,6 +324,17 @@ function LoginScreen({ onLoggedIn, onBrowseAsGuest }) {
               required
             />
           </label>
+          <div style={{ margin: '12px 0 16px', display: 'flex', alignItems: 'center' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, fontWeight: 'normal', fontSize: '13px', color: 'var(--text-muted)' }}>
+              <input
+                type="checkbox"
+                checked={staySignedIn}
+                onChange={(e) => setStaySignedIn(e.target.checked)}
+                style={{ width: '16px', height: '16px', margin: 0, cursor: 'pointer' }}
+              />
+              <span>Stay signed in on this device (30 days)</span>
+            </label>
+          </div>
           {error && <div className="form-error">{error}</div>}
           <button type="submit" disabled={busy}>
             {busy ? 'Connecting to UVa…' : 'Sign in to Judge'}
